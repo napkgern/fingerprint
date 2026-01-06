@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="th">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Login / Register - Fingerprint Attendance</title>
+    <link rel="stylesheet" href="/auth.css">
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="hero">
+            <h1>Fingerprint Attendance System</h1>
+            <p>ตัวอย่างสำหรับโปรเจกต์ — ลงชื่อเข้าใช้หรือสมัครเพื่อทดลองใช้งาน</p>
+            <img src="/classroom.jpg" alt="classroom">
+        </div>
+
+        <div class="card" id="auth-card">
+            <div class="tabs">
+                <div class="tab active" id="tab-login">Login</div>
+                <div class="tab" id="tab-register">Register</div>
+            </div>
+
+            <div id="login-form">
+                <div class="form-row">
+                    <label for="login-email">อีเมล / Username</label>
+                    <input id="login-email" placeholder="example@school.com or username">
+                </div>
+                <div class="form-row">
+                    <label for="login-password">รหัสผ่าน</label>
+                    <input id="login-password" type="password" placeholder="password">
+                </div>
+                <button class="btn" id="btn-login">เข้าสู่ระบบ</button>
+                <div class="small">ยังไม่มีบัญชี? คลิก Register</div>
+                <div id="login-msg" class="hint"></div>
+            </div>
+
+            <div id="register-form" style="display:none">
+                <div class="form-row">
+                    <label for="reg-name">ชื่อ–สกุล</label>
+                    <input id="reg-name" placeholder="ชื่อ–สกุล">
+                </div>
+                <div class="form-row">
+                    <label for="reg-username">Username</label>
+                    <input id="reg-username" placeholder="somchai">
+                </div>
+                <div class="form-row">
+                    <label for="reg-email">อีเมล</label>
+                    <input id="reg-email" placeholder="example@school.com">
+                </div>
+                <div class="form-row">
+                    <label for="reg-password">รหัสผ่าน</label>
+                    <input id="reg-password" type="password" placeholder="password">
+                </div>
+                <div class="form-row">
+                    <label for="reg-role">บทบาท</label>
+                    <select id="reg-role">
+                        <option value="student">Student</option>
+                        <option value="teacher">Teacher</option>
+                    </select>
+                </div>
+                <div class="form-row" id="student-fields">
+                    <label for="reg-studentid">รหัสนักเรียน (ถ้าเป็น Student)</label>
+                    <input id="reg-studentid" placeholder="เช่น 101">
+                </div>
+                <button class="btn" id="btn-register">สมัคร</button>
+                <div class="small">มีบัญชีแล้ว? คลิก Login</div>
+                <div id="reg-msg" class="hint"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/auth.js"></script>
+</body>
+
+</html>

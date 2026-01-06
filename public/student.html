@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="th">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Fingerprint Attendance Prototype</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <header>
+        <div class="brand">
+            <div class="logo">FA</div>
+            <div>
+                <h1>Fingerprint Attendance System</h1>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <span id="user-display" class="muted"></span>
+            <button class="btn secondary" id="btn-logout">Logout</button>
+        </div>
+    </header>
+
+
+    <main>
+
+        <div class="grid">
+            <!-- left/main column -->
+            <div>
+                <!-- Student Dashboard -->
+                <section id="student-dashboard" class="card" aria-labelledby="student-title">
+                    <div class="row head">
+                        <div>
+                            <h2 id="student-title">Student Dashboard</h2>
+                            <small class="muted">สรุปการเข้าเรียนและสถานะลายนิ้วมือของคุณ</small>
+                        </div>
+                        <div class="row actions">
+                            <button class="btn secondary" onclick="showEnrollmentGuide()">วิธีลงทะเบียน</button>
+                            <button class="btn" onclick="simulateStudentScan()">Simulate Scan</button>
+                        </div>
+                    </div>
+
+                    <div class="top-summary">
+                        <div class="stat">
+                            <div class="muted">วันนี้เรียน</div>
+                            <div class="big" id="student-today-count">0</div>
+                            <div class="muted">คาบ</div>
+                        </div>
+                        <div class="stat">
+                            <div class="muted">เช็กชื่อล่าสุด</div>
+                            <div id="student-last-att">-</div>
+                            <div class="muted">สถานะ</div>
+                        </div>
+                        <div class="stat">
+                            <div class="muted">Fingerprint Status</div>
+                            <div id="student-fp-status"><span class="chip danger">Not Enrolled</span></div>
+                            <div class="muted">Fingerprint ID: <span id="student-fp-id">—</span></div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>Attendance by Subject</h3>
+                        <div class="form-row">
+                            <select id="student-subject-select"></select>
+                            <button class="btn secondary" onclick="renderStudentAttendance()">ดู</button>
+                        </div>
+                        <div id="student-att-table" class="att-area"></div>
+                    </div>
+                </section>
+
+                <!-- Teacher Dashboard -->
+                <section id="teacher-dashboard" class="card" style="display:none" aria-labelledby="teacher-title">
+                    <div class="row head">
+                        <div>
+                            <h2 id="teacher-title">Teacher Dashboard</h2>
+                            <small class="muted">จัดการนักเรียนและดูรายงานการเข้าเรียน</small>
+                        </div>
+                        <div class="row actions">
+                            <button class="btn" onclick="openCreateSession()">Create Session</button>
+                            <button class="btn secondary" onclick="simulateScan()">Simulate Scan</button>
+                        </div>
+                    </div>
+
+                    <div class="top-summary">
+                        <div class="stat">
+                            <div class="muted">Session ปัจจุบัน</div>
+                            <div id="teacher-current-session">No session</div>
+                        </div>
+                        <div class="stat">
+                            <div class="muted">ผู้มาเรียนวันนี้</div>
+                            <div id="teacher-present-count">0</div>
+                        </div>
+                        <div class="stat">
+                            <div class="muted">รวมทั้งหมด</div>
+                            <div id="teacher-total-students">0</div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>Manage Students</h3>
+                        <div class="form-row">
+                            <input id="student-search" placeholder="ค้นหาชื่อนักเรียน" oninput="renderStudents()">
+                            <button class="btn" onclick="openAddStudent()">+ Add Student</button>
+                        </div>
+                        <div id="students-table"></div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>Attendance by Subject</h3>
+                        <div class="form-row">
+                            <select id="teacher-subject-select" onchange="renderAttendanceBySession()"></select>
+                            <select id="teacher-session-select"></select>
+                            <button class="btn secondary" onclick="renderAttendanceBySession()">Filter</button>
+                        </div>
+                        <div id="attendance-table"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- right column -->
+            <aside class="right-col">
+                <div class="card">
+                    <h3>Current/Preview</h3>
+                    <div class="center-banner" title="preview image"></div>
+                    <div class="session-card">
+                        <div>
+                            <div class="bold" id="preview-subject">—</div>
+                            <div class="muted" id="preview-time">—</div>
+                        </div>
+                        <div style="text-align:right">
+                            <div class="muted">Status</div>
+                            <div class="chip" id="preview-status">Idle</div>
+                        </div>
+                    </div>
+                </div>
+
+
+            </aside>
+        </div>
+    </main>
+
+    <!-- modal -->
+    <div class="modal-backdrop" id="modal-backdrop">
+        <div class="modal" id="modal"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
