@@ -94,7 +94,9 @@
                         <h3>Attendance by Subject</h3>
                         <div class="form-row">
                             <select id="teacher-subject-select"></select>
-                            <select id="teacher-session-select" onchange="renderAttendanceBySession()"></select>
+                            <select id="teacher-session-select" onchange="renderAttendanceBySession()">
+                                <option value="">-- รอบเรียน --</option>
+                            </select>
 
                             <button class="btn secondary" onclick="renderAttendanceBySession()">Filter</button>
                         </div>

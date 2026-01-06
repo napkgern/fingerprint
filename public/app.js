@@ -1,7 +1,7 @@
 /* =======================================
    Global state (prototype + login info)
 ======================================= */
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = '/api';
 
 function getAuthHeaders() {
   const token = localStorage.getItem('fa_token');
@@ -641,7 +641,7 @@ async function createSession() {
   }
 
   try {
-    const res = await fetch('http://localhost:3000/api/sessions', {
+    const res = await fetch('/api/sessions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1115,7 +1115,7 @@ document.getElementById('teacher-subject-select').addEventListener('change', e =
 async function loadLiveDashboard() {
   const token = localStorage.getItem('fa_token');
 
-  const res = await fetch('http://localhost:3000/api/dashboard/live-summary', {
+  const res = await fetch('/api/dashboard/live-summary', {
     headers: { Authorization: `Bearer ${token}` }
   });
 

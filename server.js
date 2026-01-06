@@ -1,4 +1,4 @@
-// server.js (ปรับปรุง)
+// server.js (PostgreSQL version)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -19,8 +19,8 @@ const SALT_ROUNDS = parseInt(process.env.SALT_ROUNDS || '10', 10);
 
 /* ------------------ Helpers ------------------ */
 async function findUserByUsernameOrEmail(identifier) {
-  const [rows] = await pool.query(
-    'SELECT user_id, username, email, password_hash, role FROM users WHERE username = ? OR email = ? LIMIT 1',
+  const { rows } = await pool.query(
+    'SELECT user_id, username, email, password_hash, role FROM users WHERE username = $1 OR email = $2 LIMIT 1',
     [identifier, identifier]
   );
   return rows[0];
@@ -32,17 +32,21 @@ app.post('/api/register', async (req, res) => {
     const { name, username, email, password, role = 'student', student_code } = req.body;
     if (!username || !password || !name) return res.status(400).json({ error: 'ข้อมูลไม่ครบ' });
 
-    const [existsRows] = await pool.query('SELECT user_id FROM users WHERE username = ? OR email = ? LIMIT 1', [username, email]);
-    if (existsRows.length) return res.status(400).json({ error: 'username หรือ email มีแล้ว' });
+    const existsRows = await pool.query('SELECT user_id FROM users WHERE username = $1 OR email = $2 LIMIT 1', [username, email]);
+    if (existsRows.rows.length) return res.status(400).json({ error: 'username หรือ email มีแล้ว' });
 
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
-    const [r] = await pool.query('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email || null, hash, role]);
-    const userId = r.insertId;
+    // Postgres insert returning id
+    const r = await pool.query(
+      'INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING user_id',
+      [username, email || null, hash, role]
+    );
+    const userId = r.rows[0].user_id;
 
     if (role === 'student') {
-      await pool.query('INSERT INTO students (user_id, student_code, full_name) VALUES (?, ?, ?)', [userId, student_code || null, name]);
+      await pool.query('INSERT INTO students (user_id, student_code, full_name) VALUES ($1, $2, $3)', [userId, student_code || null, name]);
     } else if (role === 'teacher') {
-      await pool.query('INSERT INTO teachers (user_id, full_name) VALUES (?, ?)', [userId, name]);
+      await pool.query('INSERT INTO teachers (user_id, full_name) VALUES ($1, $2)', [userId, name]);
     }
 
     const token = jwt.sign({ user_id: userId, username, role }, JWT_SECRET, { expiresIn: '8h' });
@@ -95,7 +99,7 @@ function authMiddleware(req, res, next) {
 /* ------------------ Get profile ------------------ */
 app.get('/api/me', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT user_id, username, email, role FROM users WHERE user_id = ?', [req.user.user_id]);
+    const { rows } = await pool.query('SELECT user_id, username, email, role FROM users WHERE user_id = $1', [req.user.user_id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json({ user: rows[0] });
   } catch (err) {
@@ -113,14 +117,15 @@ app.post('/api/attendance', async (req, res) => {
     }
 
     // 1️⃣ หา session
-    const [sessRows] = await pool.query(
+    const sessResult = await pool.query(
       `
       SELECT start_time, late_after, absent_after, status
       FROM sessions
-      WHERE session_id = ?
+      WHERE session_id = $1
       `,
       [session_id]
     );
+    const sessRows = sessResult.rows;
 
     if (!sessRows.length || sessRows[0].status !== 'live') {
       return res.status(403).json({ error: 'session not live' });
@@ -135,6 +140,7 @@ app.post('/api/attendance', async (req, res) => {
     // 3️⃣ ตัดสินสถานะ
     let attendanceStatus = 'Present';
 
+    // Postgres time comparison works with strings like '18:00:00' vs '19:00:00'.
     if (session.absent_after && nowTime > session.absent_after) {
       attendanceStatus = 'Absent';
     } else if (session.late_after && nowTime > session.late_after) {
@@ -142,10 +148,12 @@ app.post('/api/attendance', async (req, res) => {
     }
 
     // 4️⃣ หา student
-    const [stu] = await pool.query(
-      'SELECT student_id FROM students WHERE fingerprint_id = ?',
+    const stuResult = await pool.query(
+      'SELECT student_id FROM students WHERE fingerprint_id = $1',
       [fingerprint_id]
     );
+    const stu = stuResult.rows;
+
     if (!stu.length) {
       return res.status(404).json({ error: 'unknown fingerprint' });
     }
@@ -157,7 +165,7 @@ app.post('/api/attendance', async (req, res) => {
       `
       INSERT INTO attendance
       (student_id, session_id, status, fingerprint_id, device_id)
-      VALUES (?, ?, ?, ?, ?)
+      VALUES ($1, $2, $3, $4, $5)
       `,
       [student_id, session_id, attendanceStatus, fingerprint_id, device_id || null]
     );
@@ -176,7 +184,7 @@ app.post('/api/attendance', async (req, res) => {
 
 
 app.get('/api/iot/live-session', async (req, res) => {
-  const [rows] = await pool.query(
+  const { rows } = await pool.query(
     `SELECT session_id
      FROM sessions
      WHERE status = 'live'
@@ -199,7 +207,7 @@ app.get('/api/iot/live-session', async (req, res) => {
 app.get('/api/subjects/:subjectId/sessions', authMiddleware, async (req, res) => {
   try {
     const subjectId = req.params.subjectId;
-    const [rows] = await pool.query('SELECT * FROM sessions WHERE subject_id = ? ORDER BY date DESC', [subjectId]);
+    const { rows } = await pool.query('SELECT * FROM sessions WHERE subject_id = $1 ORDER BY date DESC', [subjectId]);
     res.json({ sessions: rows });
   } catch (err) {
     console.error('Get sessions error:', err);
@@ -239,7 +247,7 @@ app.get('/api/teacher/students', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'No permission' });
     }
 
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       `SELECT 
                 s.student_id,      -- PK ของตาราง students
                 s.student_code,    -- รหัสนักเรียนที่อยากโชว์ในคอลัมน์ "รหัส"
@@ -257,18 +265,6 @@ app.get('/api/teacher/students', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/teacher/students', authMiddleware, async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      'SELECT student_id, student_code, full_name, year_level, fingerprint_id FROM students'
-    );
-    res.json({ students: rows });
-  } catch (err) {
-    console.error('teacher/students error:', err);
-    res.status(500).json({ error: 'server error' });
-  }
-});
-
 // CREATE student
 app.post('/api/teacher/students', authMiddleware, async (req, res) => {
   try {
@@ -281,12 +277,12 @@ app.post('/api/teacher/students', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'ข้อมูลไม่ครบ' });
     }
 
-    const [r] = await pool.query(
-      'INSERT INTO students (student_code, full_name, year_level) VALUES (?, ?, ?)',
+    const r = await pool.query(
+      'INSERT INTO students (student_code, full_name, year_level) VALUES ($1, $2, $3) RETURNING student_id',
       [student_code, full_name, year_level || null]
     );
 
-    res.json({ ok: true, student_id: r.insertId });
+    res.json({ ok: true, student_id: r.rows[0].student_id });
   } catch (err) {
     console.error('POST /teacher/students error:', err);
     res.status(500).json({ error: 'server error' });
@@ -304,7 +300,7 @@ app.put('/api/teacher/students/:id', authMiddleware, async (req, res) => {
     const { student_code, full_name, year_level } = req.body;
 
     await pool.query(
-      'UPDATE students SET student_code = ?, full_name = ?, year_level = ? WHERE student_id = ?',
+      'UPDATE students SET student_code = $1, full_name = $2, year_level = $3 WHERE student_id = $4',
       [student_code, full_name, year_level || null, id]
     );
 
@@ -326,19 +322,19 @@ app.delete('/api/teacher/students/:id', authMiddleware, async (req, res) => {
 
     // 1️⃣ ลบ enroll commands ก่อน
     await pool.query(
-      'DELETE FROM enroll_commands WHERE student_id = ?',
+      'DELETE FROM enroll_commands WHERE student_id = $1',
       [studentId]
     );
 
     // 2️⃣ ลบ attendance
     await pool.query(
-      'DELETE FROM attendance WHERE student_id = ?',
+      'DELETE FROM attendance WHERE student_id = $1',
       [studentId]
     );
 
     // 3️⃣ ลบนักเรียน
     await pool.query(
-      'DELETE FROM students WHERE student_id = ?',
+      'DELETE FROM students WHERE student_id = $1',
       [studentId]
     );
 
@@ -362,17 +358,19 @@ app.get('/api/teacher/subjects', authMiddleware, async (req, res) => {
     }
 
     // หา teacher_id จาก user_id ที่ login
-    const [trows] = await pool.query(
-      'SELECT teacher_id FROM teachers WHERE user_id = ? LIMIT 1',
+    const trowsResult = await pool.query(
+      'SELECT teacher_id FROM teachers WHERE user_id = $1 LIMIT 1',
       [req.user.user_id]
     );
+    const trows = trowsResult.rows;
+
     if (!trows.length) {
       return res.status(400).json({ error: 'ไม่พบข้อมูลครูของ user นี้' });
     }
     const teacherId = trows[0].teacher_id;
 
-    const [rows] = await pool.query(
-      'SELECT subject_id, subject_name, teacher_id FROM subjects WHERE teacher_id = ?',
+    const { rows } = await pool.query(
+      'SELECT subject_id, subject_name, teacher_id FROM subjects WHERE teacher_id = $1',
       [teacherId]
     );
 
@@ -395,23 +393,25 @@ app.post('/api/teacher/subjects', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'ต้องกรอกชื่อวิชา' });
     }
 
-    const [trows] = await pool.query(
-      'SELECT teacher_id FROM teachers WHERE user_id = ? LIMIT 1',
+    const trowsResult = await pool.query(
+      'SELECT teacher_id FROM teachers WHERE user_id = $1 LIMIT 1',
       [req.user.user_id]
     );
+    const trows = trowsResult.rows;
+
     if (!trows.length) {
       return res.status(400).json({ error: 'ไม่พบข้อมูลครูของ user นี้' });
     }
     const teacherId = trows[0].teacher_id;
 
-    const [r] = await pool.query(
-      'INSERT INTO subjects (subject_name, teacher_id) VALUES (?, ?)',
+    const r = await pool.query(
+      'INSERT INTO subjects (subject_name, teacher_id) VALUES ($1, $2) RETURNING subject_id',
       [subject_name, teacherId]
     );
 
     res.json({
       subject: {
-        subject_id: r.insertId,
+        subject_id: r.rows[0].subject_id,
         subject_name,
         subject_code: subject_code || null,
         teacher_id: teacherId
@@ -427,7 +427,7 @@ app.post('/api/teacher/subjects', authMiddleware, async (req, res) => {
 // GET sessions
 app.get('/api/sessions', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       `
       SELECT session_id, subject_id, date,
              start_time, end_time, status
@@ -450,10 +450,11 @@ app.post('/api/sessions/start', authMiddleware, async (req, res) => {
     const teacher_id = req.user.user_id;
 
     // 🔒 กัน live ซ้อน
-    const [live] = await pool.query(
-      `SELECT session_id FROM sessions WHERE status='live' AND created_by=?`,
+    const liveResult = await pool.query(
+      `SELECT session_id FROM sessions WHERE status='live' AND created_by=$1`,
       [teacher_id]
     );
+    const live = liveResult.rows;
     if (live.length > 0) {
       return res.status(400).json({ error: 'มีคาบเรียนที่กำลังเรียนอยู่แล้ว' });
     }
@@ -466,16 +467,17 @@ app.post('/api/sessions/start', authMiddleware, async (req, res) => {
     const absentTime = new Date(now.getTime() + absent_min * 60000)
       .toTimeString().slice(0, 8);
 
-    const [result] = await pool.query(
+    const result = await pool.query(
       `
       INSERT INTO sessions
       (subject_id, date, start_time, late_after, absent_after, status, created_by)
-      VALUES (?, ?, ?, ?, ?, 'live', ?)
+      VALUES ($1, $2, $3, $4, $5, 'live', $6)
+      RETURNING session_id
       `,
       [subject_id, date, startTime, lateTime, absentTime, teacher_id]
     );
 
-    res.json({ session_id: result.insertId });
+    res.json({ session_id: result.rows[0].session_id });
 
   } catch (err) {
     console.error('Start class error:', err);
@@ -489,12 +491,12 @@ app.post('/api/sessions/end', authMiddleware, async (req, res) => {
     const teacherId = req.user.user_id;
 
     // 🔍 หา LIVE session ของอาจารย์คนนี้
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       `
       SELECT session_id
       FROM sessions
       WHERE status = 'live'
-        AND created_by = ?
+        AND created_by = $1
       LIMIT 1
       `,
       [teacherId]
@@ -517,8 +519,8 @@ app.post('/api/sessions/end', authMiddleware, async (req, res) => {
       `
       UPDATE sessions
       SET status = 'finished',
-      end_time = ?
-      WHERE session_id = ?
+      end_time = $1
+      WHERE session_id = $2
       `,
       [endTime, sessionId]
     );
@@ -548,21 +550,21 @@ app.post('/api/teacher/enroll', authMiddleware, async (req, res) => {
     }
 
     // 🔢 หา fingerprint_id ถัดไป
-    const [rows] = await pool.query(
-      'SELECT MAX(fingerprint_id) AS maxId FROM students'
+    const { rows } = await pool.query(
+      'SELECT MAX(fingerprint_id) AS maxid FROM students'
     );
-    const nextFingerId = (rows[0].maxId || 0) + 1;
+    const nextFingerId = (rows[0].maxid || 0) + 1;
 
     // 🟡 สร้างคำสั่ง enroll
-    const [r] = await pool.query(
+    const r = await pool.query(
       `INSERT INTO enroll_commands (student_id, fingerprint_id)
-       VALUES (?, ?)`,
+       VALUES ($1, $2) RETURNING id`,
       [student_id, nextFingerId]
     );
 
     res.json({
       message: 'Enroll command created',
-      command_id: r.insertId,
+      command_id: r.rows[0].id,
       fingerprint_id: nextFingerId
     });
 
@@ -579,20 +581,20 @@ app.post('/api/iot/enroll', authMiddleware, async (req, res) => {
     const { student_id } = req.body;
 
     // หา fingerprint_id ว่าง
-    const [rows] = await pool.query(
-      `SELECT MAX(fingerprint_id) AS maxId FROM students`
+    const { rows } = await pool.query(
+      `SELECT MAX(fingerprint_id) AS maxid FROM students`
     );
-    const newFingerprintId = (rows[0].maxId || 0) + 1;
+    const newFingerprintId = (rows[0].maxid || 0) + 1;
 
     // สร้างคำสั่ง enroll
-    const [r] = await pool.query(
+    const r = await pool.query(
       `INSERT INTO enroll_commands (student_id, fingerprint_id, status)
-       VALUES (?, ?, 'pending')`,
+       VALUES ($1, $2, 'pending') RETURNING id`,
       [student_id, newFingerprintId]
     );
 
     res.json({
-      command_id: r.insertId,
+      command_id: r.rows[0].id,
       fingerprint_id: newFingerprintId
     });
 
@@ -606,7 +608,7 @@ app.post('/api/iot/enroll', authMiddleware, async (req, res) => {
 app.get('/api/iot/mode', async (req, res) => {
   try {
     // 1️⃣ เช็ค enroll ก่อน
-    const [enroll] = await pool.query(
+    const enrollResult = await pool.query(
       `
       SELECT id, fingerprint_id
       FROM enroll_commands
@@ -615,6 +617,7 @@ app.get('/api/iot/mode', async (req, res) => {
       LIMIT 1
       `
     );
+    const enroll = enrollResult.rows;
 
     if (enroll.length > 0) {
       return res.json({
@@ -625,7 +628,7 @@ app.get('/api/iot/mode', async (req, res) => {
     }
 
     // 2️⃣ เช็ค live session
-    const [live] = await pool.query(
+    const liveResult = await pool.query(
       `
       SELECT session_id
       FROM sessions
@@ -634,6 +637,7 @@ app.get('/api/iot/mode', async (req, res) => {
       LIMIT 1
       `
     );
+    const live = liveResult.rows;
 
     if (live.length > 0) {
       return res.json({
@@ -651,22 +655,19 @@ app.get('/api/iot/mode', async (req, res) => {
 });
 
 
-
-
-
-
 app.post('/api/iot/enroll/done', async (req, res) => {
   const { command_id } = req.body;
 
   // 🔍 ดึงข้อมูลคำสั่ง
-  const [cmd] = await pool.query(
+  const cmdResult = await pool.query(
     `
     SELECT student_id, fingerprint_id
     FROM enroll_commands
-    WHERE id = ?
+    WHERE id = $1
     `,
     [command_id]
   );
+  const cmd = cmdResult.rows;
 
   if (!cmd.length) {
     return res.status(404).json({ error: 'command not found' });
@@ -676,18 +677,18 @@ app.post('/api/iot/enroll/done', async (req, res) => {
   await pool.query(
     `
     UPDATE students
-    SET fingerprint_id = ?
-    WHERE student_id = ?
+    SET fingerprint_id = $1
+    WHERE student_id = $2
     `,
     [cmd[0].fingerprint_id, cmd[0].student_id]
   );
 
-  // 2️⃣ ปิดคำสั่ง enroll (ตัวนี้แหละที่ห้ามลืม ❗)
+  // 2️⃣ ปิดคำสั่ง enroll
   await pool.query(
     `
     UPDATE enroll_commands
     SET status = 'done'
-    WHERE id = ?
+    WHERE id = $1
     `,
     [command_id]
   );
@@ -696,20 +697,18 @@ app.post('/api/iot/enroll/done', async (req, res) => {
 });
 
 
-
-
 async function autoEndSessions() {
   try {
     const now = new Date();
     const nowTime = now.toTimeString().slice(0, 8); // HH:mm:ss
 
     // 🔍 หา session ที่ live และเลย absent_after
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       `
       SELECT session_id
       FROM sessions
       WHERE status = 'live'
-        AND absent_after <= ?
+        AND absent_after <= $1
       `,
       [nowTime]
     );
@@ -721,8 +720,8 @@ async function autoEndSessions() {
         `
         UPDATE sessions
         SET status = 'finished',
-            end_time = ?
-        WHERE session_id = ?
+        end_time = $1
+        WHERE session_id = $2
         `,
         [nowTime, row.session_id]
       );
@@ -741,7 +740,7 @@ app.get('/api/sessions/:sessionId/attendance', authMiddleware, async (req, res) 
   try {
     const sessionId = req.params.sessionId;
 
-    const [rows] = await pool.query(`
+    const { rows } = await pool.query(`
       SELECT
         s.student_id,
         s.student_code,
@@ -752,7 +751,7 @@ app.get('/api/sessions/:sessionId/attendance', authMiddleware, async (req, res) 
       FROM students s
       LEFT JOIN attendance a
         ON s.student_id = a.student_id
-       AND a.session_id = ?
+       AND a.session_id = $1
       ORDER BY s.student_code
     `, [sessionId]);
 
@@ -768,13 +767,14 @@ app.get('/api/sessions/:sessionId/attendance', authMiddleware, async (req, res) 
 app.get('/api/dashboard/live-summary', authMiddleware, async (req, res) => {
   try {
     // หา session live
-    const [live] = await pool.query(`
+    const liveResult = await pool.query(`
       SELECT s.session_id, s.subject_id, sb.subject_name, s.date, s.start_time, s.late_after, s.absent_after
       FROM sessions s
       JOIN subjects sb ON s.subject_id = sb.subject_id
       WHERE s.status = 'live'
       LIMIT 1
     `);
+    const live = liveResult.rows;
 
     if (!live.length) {
       return res.json({ live: false });
@@ -782,10 +782,10 @@ app.get('/api/dashboard/live-summary', authMiddleware, async (req, res) => {
 
     const session = live[0];
 
-    const [rows] = await pool.query(`
+    const { rows } = await pool.query(`
       SELECT status, COUNT(*) AS cnt
       FROM attendance
-      WHERE session_id = ?
+      WHERE session_id = $1
       GROUP BY status
     `, [session.session_id]);
 
@@ -793,8 +793,8 @@ app.get('/api/dashboard/live-summary', authMiddleware, async (req, res) => {
     let late = 0;
 
     for (const r of rows) {
-      if (r.status === 'Present') onTime = r.cnt;
-      if (r.status === 'Late') late = r.cnt;
+      if (r.status === 'Present') onTime = parseInt(r.cnt, 10);
+      if (r.status === 'Late') late = parseInt(r.cnt, 10);
     }
 
     res.json({
@@ -804,7 +804,9 @@ app.get('/api/dashboard/live-summary', authMiddleware, async (req, res) => {
       date: session.date,
       start_time: session.start_time,
       late_after: session.late_after,
-      absent_after: session.absent_after
+      absent_after: session.absent_after,
+      onTime,
+      late
     });
   } catch (err) {
     console.error('Live summary error:', err);
